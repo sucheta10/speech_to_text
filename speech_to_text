@@ -1,0 +1,69 @@
+!pip install transformers
+!pip install datasets
+!pip install torchaudio
+!pip install pydub
+!pip install google-colab
+
+import torch
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+from datasets import load_dataset
+from pydub import AudioSegment
+import torchaudio
+from torchaudio.transforms import Resample
+from google.colab import drive
+
+# Mount Google Drive
+drive.mount('/content/drive')
+
+# Specify the path to your audio file
+audio_file_path = '/content/drive/My Drive/speech_to_text3.wav'
+
+# This function loads an audio file, converts it to mono if necessary, exports it to a temporary wav file, and resamples it to a target sample rate if needed.
+
+
+def load_and_preprocess_audio(file_path, target_sample_rate=16000):
+    # Load audio using pydub
+    audio = AudioSegment.from_file(file_path) #  Creates an AudioSegment object from the specified file, allowing for easy manipulation of the audio data.
+    
+    # Ensure audio is mono
+    if audio.channels > 1: # audio.channels- Checks the number of channels in the audio file.
+        audio = audio.set_channels(1)  # Converts the audio to mono by setting the number of channels to 1
+    
+    # Export to wav format
+    audio.export("audio.wav", format="wav")#  saves the audio to a file named "audio.wav" in wav format.  
+    
+    
+    # Load audio using torchaudio
+    waveform, sample_rate = torchaudio.load("audio.wav") # Loads the temporary wav file using torchaudio, which returns the audio data as a tensor and its sample rate.
+    
+    # Resample if necessary
+    if sample_rate != target_sample_rate: # Checks if the current sample rate matches the target sample rate.
+        resampler = Resample(orig_freq=sample_rate, new_freq=target_sample_rate) # Creates a Resample object to handle the resampling process.
+        waveform = resampler(waveform) # Applies the resampling transformation to the audio waveform.
+    
+    return waveform, target_sample_rate # Returns the processed audio waveform and the target sample rate.
+
+waveform, sample_rate = load_and_preprocess_audio(audio_file_path) # Calls the load_and_preprocess_audio function with the specified audio_file_path and assigns the returned values to waveform and sample_rate.
+                                                                  
+# Load pretrained Wav2Vec2 processor and model
+model_name = "facebook/wav2vec2-base-960h" # Defines the name of the pretrained model I am using
+processor = Wav2Vec2Processor.from_pretrained(model_name) # Loads the Wav2Vec2 processor from the pretrained mode
+model = Wav2Vec2ForCTC.from_pretrained(model_name) # Loads the Wav2Vec2 model for CTC (Connectionist Temporal Classification) from the pretrained model.
+
+# Ensure the waveform is 1D and has the correct shape
+waveform = waveform.squeeze() # Removes any extra dimensions from the waveform tensor.
+
+# Preprocess the audio input
+input_values = processor(waveform, sampling_rate=sample_rate, return_tensors="pt").input_values # Converts the waveform into a format suitable for the model.
+
+# Perform inference
+with torch.no_grad():
+    logits = model(input_values).logits # Runs the input values through the model to get the logits(raw, unnormalized scores).
+
+# Take argmax and decode the output
+predicted_ids = torch.argmax(logits, dim=-1) # Converts the logits to predicted token IDs by taking the index with the highest score for each timestep
+transcription = processor.decode(predicted_ids[0]) # Converts the predicted token IDs into human-readable text
+
+print("Transcription:", transcription) # Outputs the final transcription result
+
+
